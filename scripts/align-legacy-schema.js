@@ -5,6 +5,8 @@ const mysql = require("mysql2/promise");
 
 loadEnvConfig(process.cwd());
 
+const DB_FILTER = "WHERE TABLE_SCHEMA = DATABASE()";
+
 function requireHexKey(name) {
   const hex = process.env[name];
   if (!hex || !/^[a-f0-9]{64}$/i.test(hex)) {
@@ -26,7 +28,7 @@ function hmacHash(value) {
 
 async function columnExists(connection, table, column) {
   const [rows] = await connection.query(
-    "SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+    `SELECT 1 FROM information_schema.COLUMNS ${DB_FILTER} AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
     [table, column]
   );
   return rows.length > 0;
@@ -34,7 +36,7 @@ async function columnExists(connection, table, column) {
 
 async function tableExists(connection, table) {
   const [rows] = await connection.query(
-    "SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
+    `SELECT 1 FROM information_schema.TABLES ${DB_FILTER} AND TABLE_NAME = ?`,
     [table]
   );
   return rows.length > 0;
@@ -42,7 +44,7 @@ async function tableExists(connection, table) {
 
 async function indexExists(connection, table, index) {
   const [rows] = await connection.query(
-    "SELECT 1 FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?",
+    `SELECT 1 FROM information_schema.STATISTICS ${DB_FILTER} AND TABLE_NAME = ? AND INDEX_NAME = ?`,
     [table, index]
   );
   return rows.length > 0;
@@ -50,7 +52,7 @@ async function indexExists(connection, table, index) {
 
 async function triggerExists(connection, name) {
   const [rows] = await connection.query(
-    "SELECT 1 FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME = ?",
+    `SELECT 1 FROM information_schema.TRIGGERS ${DB_FILTER} AND TRIGGER_NAME = ?`,
     [name]
   );
   return rows.length > 0;
@@ -85,7 +87,7 @@ async function alignUsers(connection) {
 
 async function alignSessions(connection) {
   const [idColumn] = await connection.query(
-    "SELECT DATA_TYPE AS dataType FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+    `SELECT DATA_TYPE AS dataType FROM information_schema.COLUMNS ${DB_FILTER} AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
     ["sessions", "id"]
   );
   if (idColumn[0]?.dataType === "int") {
@@ -255,4 +257,3 @@ main().catch((error) => {
   console.error("Schema alignment failed:", error.code || error.message);
   process.exit(1);
 });
-

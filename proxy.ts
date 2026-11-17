@@ -14,13 +14,14 @@ import type { NextRequest } from "next/server";
 
 // Public routes (no auth required)
 const PUBLIC_ROUTES = [
-  "/",
   "/login",
   "/register",
   "/forgot-password",
   "/reset-password",
   "/privacy",
   "/terms",
+  "/robots.txt",
+  "/sitemap.xml",
   "/api/auth/login",
   "/api/auth/register",
   "/api/auth/forgot-password",
@@ -58,13 +59,51 @@ function checkSubrequestBypass(request: NextRequest): boolean {
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const method = request.method;
+  const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
+  const isDevelopment = process.env.NODE_ENV === "development";
+  const csp = [
+    "default-src 'self'",
+    "script-src 'self' 'nonce-" + nonce + "' 'strict-dynamic'" + (isDevelopment ? " 'unsafe-eval'" : ""),
+    "style-src 'self' 'nonce-" + nonce + "'",
+    "style-src-attr 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join("; ");
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("Content-Security-Policy", csp);
+  const nextResponse = () => {
+    const response = NextResponse.next({ request: { headers: requestHeaders } });
+    response.headers.set("Content-Security-Policy", csp);
+    response.headers.set("Cross-Origin-Embedder-Policy", "require-corp");
+    return response;
+  };
 
   // CVE-2025-29927: Block subrequest bypass attempts
   if (checkSubrequestBypass(request)) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Forbidden", code: "SUBREQUEST_BYPASS_ATTEMPT" },
       { status: 403 }
     );
+    response.headers.set("Content-Security-Policy", csp);
+    response.headers.set("Cross-Origin-Embedder-Policy", "require-corp");
+    return response;
+  }
+
+  // Keep the public root redirect small; rendering a page-level redirect
+  // includes a Next.js response body that ZAP reports as a large redirect.
+  if (pathname === "/") {
+    const response = NextResponse.redirect(new URL("/login", request.url));
+    response.headers.set("Cache-Control", "no-store");
+    response.headers.set("Content-Type", "text/plain; charset=utf-8");
+    response.headers.set("Content-Security-Policy", csp);
+    response.headers.set("Cross-Origin-Embedder-Policy", "require-corp");
+    return response;
   }
 
   // Check if route is public
@@ -76,7 +115,7 @@ export function proxy(request: NextRequest) {
   });
   
   if (isPublicRoute) {
-    return NextResponse.next();
+    return nextResponse();
   }
 
   // Check session cookie (session_id, NOT session)
@@ -85,14 +124,22 @@ export function proxy(request: NextRequest) {
   if (!sessionId) {
     // Redirect to login for page routes
     if (!pathname.startsWith("/api/")) {
-      return NextResponse.redirect(new URL("/login", request.url));
+      const response = NextResponse.redirect(new URL("/login", request.url));
+      response.headers.set("Cache-Control", "no-store");
+      response.headers.set("Content-Type", "text/plain; charset=utf-8");
+      response.headers.set("Content-Security-Policy", csp);
+      response.headers.set("Cross-Origin-Embedder-Policy", "require-corp");
+      return response;
     }
 
     // Return 401 for API routes (fail-closed)
-    return NextResponse.json(
+    const response = NextResponse.json(
       { error: "Unauthorized", code: "SESSION_MISSING" },
       { status: 401 }
     );
+    response.headers.set("Content-Security-Policy", csp);
+    response.headers.set("Cross-Origin-Embedder-Policy", "require-corp");
+    return response;
   }
 
   // CSRF check for mutating requests (H5)
@@ -107,10 +154,13 @@ export function proxy(request: NextRequest) {
       // Note: Full CSRF validation (HMAC verify) happens in API routes
       // Middleware just checks token presence (fail-fast)
       if (!csrfToken) {
-        return NextResponse.json(
+        const response = NextResponse.json(
           { error: "CSRF token required", code: "CSRF_MISSING" },
           { status: 403 }
         );
+        response.headers.set("Content-Security-Policy", csp);
+        response.headers.set("Cross-Origin-Embedder-Policy", "require-corp");
+        return response;
       }
     }
   }
@@ -123,7 +173,7 @@ export function proxy(request: NextRequest) {
   // We only block obvious mismatches in route handler
   // Example: /dashboard/pusat route should check session.role === 'PUSAT'
 
-  return NextResponse.next();
+  return nextResponse();
 }
 
 export const config = {

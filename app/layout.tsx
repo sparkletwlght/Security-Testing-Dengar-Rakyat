@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { connection } from "next/server";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -6,11 +7,13 @@ export const metadata: Metadata = {
   description: "Lapor, dilacak, ditindaklanjuti",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  await connection();
+
   return (
     <html lang="id" suppressHydrationWarning>
       <body className="antialiased" suppressHydrationWarning>{children}</body>

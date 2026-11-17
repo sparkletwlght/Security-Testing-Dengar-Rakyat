@@ -42,8 +42,14 @@ export default function AuditPusat() {
       inFlight = true;
       try {
         const [countResponse, reportResponse] = await Promise.all([
-          fetch("/api/admin/laporan-agregasi-nasional", { cache: "no-store" }),
-          fetch("/api/laporan?limit=15", { cache: "no-store" }),
+          fetch("/api/admin/laporan-agregasi-nasional", { 
+            cache: "no-store",
+            credentials: "include",
+          }),
+          fetch("/api/laporan?limit=15", { 
+            cache: "no-store",
+            credentials: "include",
+          }),
         ]);
         if (!countResponse.ok || !reportResponse.ok) throw new Error("Gagal memuat laporan nasional");
         const [countsResult, reportsResult] = await Promise.all([countResponse.json(), reportResponse.json()]);

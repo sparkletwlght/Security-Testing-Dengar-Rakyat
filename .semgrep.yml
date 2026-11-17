@@ -1,0 +1,21 @@
+rules:
+  - id: semgrep-security-rules
+    patterns:
+      # False positive: Schema migration script with parameterized queries
+      - pattern-either:
+          - patterns:
+              - pattern: |
+                  await connection.query(...)
+              - metavariable-comparison:
+                  metavariable: $FILE
+                  comparison: match
+                  value: scripts/align-legacy-schema\.js
+          - patterns:
+              - pattern: path.resolve(...)
+              - metavariable-comparison:
+                  metavariable: $FILE
+                  comparison: match
+                  value: features/laporan/status\.service\.ts
+    message: "Potential security issue - review context for false positive determination"
+    languages: [javascript, typescript]
+    severity: INFO

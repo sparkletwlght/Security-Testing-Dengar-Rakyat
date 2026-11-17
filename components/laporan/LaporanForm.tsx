@@ -141,6 +141,7 @@ export default function LaporanForm() {
           onChange={(e) => setKategori(e.target.value)}
           required
           className="input-field w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:border-blue-600 focus:outline-none"
+          aria-label="Pilih kategori permasalahan yang ingin dilaporkan"
         >
           <option value="">-- Pilih Kategori Laporan --</option>
           {KATEGORI_OPTIONS.map((k) => (
@@ -163,13 +164,24 @@ export default function LaporanForm() {
           placeholder="Ceritakan masalah yang ingin Anda laporkan..."
           required
           className="input-field w-full rounded-lg border border-gray-300 px-3.5 py-2.5 text-sm focus:border-blue-600 focus:outline-none"
+          aria-label="Deskripsi rinci keluhan yang akan dilaporkan"
         />
       </div>
 
-      <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm">
-        <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} className="mt-1 accent-cyan-500" />
-        <span><strong className="block text-gray-900">Bagikan ke Ruang Warga (opsional)</strong>
-          <span className="mt-1 block text-gray-500">Jika dipilih, judul, kategori, isi laporan, kota/kabupaten, status, dan waktu dapat dilihat serta dikomentari pengguna lain. Nama Anda disamarkan. Foto bukti, titik GPS, email, dan NIK tetap privat.</span>
+      <label htmlFor="isPublic" className="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm">
+        <input 
+          id="isPublic"
+          type="checkbox" 
+          checked={isPublic} 
+          onChange={(e) => setIsPublic(e.target.checked)} 
+          className="mt-1 accent-cyan-500" 
+          aria-describedby="shareDescription"
+        />
+        <span>
+          <strong className="block text-gray-900">Bagikan ke Ruang Warga (opsional)</strong>
+          <span id="shareDescription" className="mt-1 block text-gray-500">
+            Jika dipilih, judul, kategori, isi laporan, kota/kabupaten, status, dan waktu dapat dilihat serta dikomentari pengguna lain. Nama Anda disamarkan. Foto bukti, titik GPS, email, dan NIK tetap privat.
+          </span>
         </span>
       </label>
 
@@ -182,16 +194,24 @@ export default function LaporanForm() {
         <label
           htmlFor="foto"
           className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 p-4 text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50/30 transition-all"
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              document.getElementById("foto")?.click();
+            }
+          }}
+          aria-label="Unggah foto bukti fisik - klik untuk membuka file picker"
         >
           {previewUrl ? (
             <div className="space-y-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={previewUrl} alt="Preview Foto" className="h-44 w-auto mx-auto rounded-lg object-cover shadow" />
+              <img src={previewUrl} alt="Preview foto bukti yang dipilih" className="h-44 w-auto mx-auto rounded-lg object-cover shadow" />
               <p className="text-xs text-blue-600 font-medium">Klik untuk mengganti foto</p>
             </div>
           ) : (
             <div className="space-y-1 text-gray-500">
-              <span className="text-2xl">📸</span>
+              <span className="text-2xl" aria-hidden="true">📸</span>
               <p className="text-sm font-medium text-gray-700">Klik untuk mengambil foto bukti langsung</p>
               <p className="text-xs text-gray-400">Mendukung kamera HP/Webcam (JPEG, PNG maks 10MB)</p>
             </div>
@@ -206,6 +226,7 @@ export default function LaporanForm() {
           required
           onChange={handleFileChange}
           className="hidden"
+          aria-label="File input untuk foto bukti"
         />
       </div>
 
@@ -216,9 +237,12 @@ export default function LaporanForm() {
             ? "border-emerald-200 bg-emerald-50 text-emerald-800"
             : "border-amber-200 bg-amber-50 text-amber-800"
         }`}
+        role="status"
+        aria-live="polite"
+        aria-label={gpsLocked ? "Lokasi GPS terkunci" : "GPS sedang dicari"}
       >
         <div className="flex items-center space-x-2">
-          <span>{gpsLocked ? "📍" : "⏳"}</span>
+          <span aria-hidden="true">{gpsLocked ? "📍" : "⏳"}</span>
           <span>{gpsStatus}</span>
         </div>
         {!gpsLocked && (
@@ -226,6 +250,7 @@ export default function LaporanForm() {
             type="button"
             onClick={requestLocation}
             className="rounded bg-amber-600 px-2 py-1 text-white hover:bg-amber-700 text-[11px] font-medium"
+            aria-label="Coba lagi untuk mengunci lokasi GPS"
           >
             Coba Lagi
           </button>

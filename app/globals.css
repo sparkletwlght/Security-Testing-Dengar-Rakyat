@@ -248,6 +248,7 @@ input:-webkit-autofill:focus {
 .auth-content { animation: page-enter 750ms 90ms cubic-bezier(.2,.75,.25,1) both; }
 .auth-shell { box-shadow: 0 36px 100px -42px rgba(0,0,0,.95), 0 0 0 1px rgba(103,232,249,.035), inset 0 1px 0 rgba(255,255,255,.055); }
 .brand-mark { box-shadow: 0 10px 28px -12px rgba(34,211,238,.7), inset 0 1px 0 rgba(255,255,255,.2); }
+.brand-panel .auth-tagline-accent { color: #cffafe; text-shadow: 0 2px 18px rgba(34, 211, 238, .16); }
 .dashboard-theme .profile-banner { background: radial-gradient(26rem 18rem at 100% 0, rgba(34,211,238,.19), transparent 70%), linear-gradient(125deg, rgba(11,48,61,.96), rgba(9,25,43,.96)) !important; }
 .auth-page input:not([type="checkbox"]),
 .auth-page textarea,

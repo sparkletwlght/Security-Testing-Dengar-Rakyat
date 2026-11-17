@@ -27,8 +27,8 @@ export default function AuthCard({ title, subtitle, children }: Props) {
           </div>
 
           <div className="relative space-y-8">
-            <h2 className="text-3xl font-bold leading-tight">
-              Suara warga,
+            <h2 className="auth-tagline text-3xl font-bold leading-tight">
+              <span className="auth-tagline-accent">Suara warga,</span>
               <br />
               <span className="text-white">langsung didengar.</span>
             </h2>

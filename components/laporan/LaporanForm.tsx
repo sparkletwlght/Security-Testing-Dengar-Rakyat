@@ -168,22 +168,24 @@ export default function LaporanForm() {
         />
       </div>
 
-      <label htmlFor="isPublic" className="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm">
-        <input 
-          id="isPublic"
-          type="checkbox" 
-          checked={isPublic} 
-          onChange={(e) => setIsPublic(e.target.checked)} 
-          className="mt-1 accent-cyan-500" 
-          aria-describedby="shareDescription"
-        />
-        <span>
-          <strong className="block text-gray-900">Bagikan ke Ruang Warga (opsional)</strong>
-          <span id="shareDescription" className="mt-1 block text-gray-500">
-            Jika dipilih, judul, kategori, isi laporan, kota/kabupaten, status, dan waktu dapat dilihat serta dikomentari pengguna lain. Nama Anda disamarkan. Foto bukti, titik GPS, email, dan NIK tetap privat.
-          </span>
-        </span>
-      </label>
+      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm">
+        <div className="flex items-start gap-3">
+          <input
+            id="isPublic"
+            type="checkbox"
+            checked={isPublic}
+            onChange={(e) => setIsPublic(e.target.checked)}
+            className="mt-1 accent-cyan-500"
+            aria-describedby="shareDescription"
+          />
+          <label htmlFor="isPublic" className="cursor-pointer font-medium text-gray-900">
+            Bagikan ke Ruang Warga (opsional)
+          </label>
+        </div>
+        <p id="shareDescription" className="mt-1 pl-7 text-gray-500">
+          Jika dipilih, judul, kategori, isi laporan, kota/kabupaten, status, dan waktu dapat dilihat serta dikomentari pengguna lain. Nama Anda disamarkan. Foto bukti, titik GPS, email, dan NIK tetap privat.
+        </p>
+      </div>
 
       {/* Ambil Foto Bukti */}
       <div className="space-y-2">
@@ -194,14 +196,6 @@ export default function LaporanForm() {
         <label
           htmlFor="foto"
           className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 p-4 text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50/30 transition-all"
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              document.getElementById("foto")?.click();
-            }
-          }}
-          aria-label="Unggah foto bukti fisik - klik untuk membuka file picker"
         >
           {previewUrl ? (
             <div className="space-y-2">
@@ -225,9 +219,12 @@ export default function LaporanForm() {
           capture="environment"
           required
           onChange={handleFileChange}
-          className="hidden"
-          aria-label="File input untuk foto bukti"
+          className="sr-only"
+          aria-describedby="foto-hint"
         />
+        <p id="foto-hint" className="sr-only">
+          Unggah foto bukti fisik. Format JPEG atau PNG, maksimal 10 MB.
+        </p>
       </div>
 
       {/* Status GPS Geo-Tagging */}

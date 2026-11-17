@@ -14,7 +14,7 @@ export default function CommunityFeed() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   async function load(before?: number) {
-    const response = await fetch(`/api/feed?limit=20${before ? `&before=${before}` : ""}`);
+    const response = await fetch(`/api/feed?limit=20${before ? `&before=${before}` : ""}`, { credentials: "include" });
     const data = await response.json();
     if (response.ok) { setPosts((current) => before ? [...current, ...data.posts] : data.posts); setNext(data.next); }
     setLoading(false);
@@ -23,18 +23,18 @@ export default function CommunityFeed() {
   async function showComments(id: number) {
     const target = open === id ? null : id; setOpen(target); setMessage("");
     if (target && !comments[id]) {
-      const response = await fetch(`/api/feed/${id}/comments`);
+      const response = await fetch(`/api/feed/${id}/comments`, { credentials: "include" });
       const data = await response.json(); if (response.ok) setComments((all) => ({ ...all, [id]: data }));
     }
   }
   async function submitComment(id: number) {
     setMessage("");
-    const csrf = await fetch("/api/auth/csrf").then((r) => r.json());
-    const response = await fetch(`/api/feed/${id}/comments`, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf.token }, body: JSON.stringify({ isi: drafts[id] || "" }) });
+    const csrf = await fetch("/api/auth/csrf", { credentials: "include" }).then((r) => r.json());
+    const response = await fetch(`/api/feed/${id}/comments`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf.token }, body: JSON.stringify({ isi: drafts[id] || "" }) });
     const data = await response.json();
     if (!response.ok) { setMessage(data.error || "Komentar gagal dikirim"); return; }
     setDrafts((all) => ({ ...all, [id]: "" }));
-    const updated = await fetch(`/api/feed/${id}/comments`).then((r) => r.json());
+    const updated = await fetch(`/api/feed/${id}/comments`, { credentials: "include" }).then((r) => r.json());
     setComments((all) => ({ ...all, [id]: updated })); setPosts((all) => all.map((post) => post.id === id ? { ...post, comment_count: post.comment_count + 1 } : post));
   }
   if (loading) return <p className="text-gray-400">Memuat Ruang Warga...</p>;

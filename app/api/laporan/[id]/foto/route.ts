@@ -5,16 +5,22 @@ import { findLaporanById } from "@/features/laporan/laporan.queries";
 import { getWilayahTreeIds } from "@/features/wilayah/territory.queries";
 import { SESSION_COOKIE_NAME } from "@/lib/cookies";
 import { inspectReportFile } from "@/lib/report-files";
-import { logDataEvent } from "@/features/audit/audit.service";
+import { logDataEvent, logSystemEvent } from "@/features/audit/audit.service";
 import { getClientIP } from "@/lib/request-context";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const cookieStore = await cookies();
   const sessionId = cookieStore.get(SESSION_COOKIE_NAME)?.value;
-  if (!sessionId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!sessionId) {
+    await logSystemEvent({ event_type: "permission_denied", request: req, http_status: 401, metadata: { reason: "unauthenticated", action: "report_photo_read" } });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const session = await validateSession(sessionId);
-  if (!session.valid || !session.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session.valid || !session.user) {
+    await logSystemEvent({ event_type: "permission_denied", request: req, http_status: 401, metadata: { reason: "invalid_session", action: "report_photo_read" } });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const { id } = await params;
   const reportId = Number(id);
@@ -34,7 +40,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     ? await getWilayahTreeIds(user.wilayah_id)
     : role === "warga" ? [] : undefined;
   const report = await findLaporanById(reportId, user.id, wilayahIds, isPusat);
-  if (!report) return NextResponse.json({ error: "Laporan tidak ditemukan" }, { status: 404 });
+  if (!report) {
+    await logSystemEvent({
+      event_type: "permission_denied", user_id: user.id, user_email: user.email,
+      user_role: user.role, request: req, http_status: 404,
+      metadata: { reason: "report_missing_or_out_of_scope", action: "report_photo_read", target_id: String(reportId) },
+    });
+    return NextResponse.json({ error: "Laporan tidak ditemukan" }, { status: 404 });
+  }
 
   const slot = new URL(req.url).searchParams.get("slot");
   const storedPath = slot === "before" ? report.foto_path : slot === "after" ? report.foto_hasil_path : null;
@@ -44,6 +57,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const image = await inspectReportFile(storedPath, expectedHash);
   if (!image) return NextResponse.json({ error: "Berkas foto tidak tersedia atau formatnya tidak valid" }, { status: 404 });
   if (expectedHash && !image.integrityValid) {
+    await logSystemEvent({
+      event_type: "permission_denied", user_id: user.id, user_email: user.email,
+      user_role: user.role, request: req, http_status: 409,
+      metadata: { reason: "report_photo_integrity_failed", target_id: String(reportId) },
+    });
     return NextResponse.json({ error: "Integritas berkas foto gagal diverifikasi" }, { status: 409 });
   }
 
@@ -55,6 +73,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     target_type: "laporan_foto",
     target_id: `${reportId}:${slot}`,
     ip_address: getClientIP(req),
+    request: req,
+    http_status: 200,
     metadata: { slot },
   });
 

@@ -9,18 +9,27 @@ import { getUserFromSession } from "@/features/auth/session.service";
 import { SESSION_COOKIE_NAME } from "@/lib/cookies";
 import { query } from "@/lib/db";
 import { decrypt } from "@/lib/crypto";
+import { logDataEvent, logSystemEvent } from "@/features/audit/audit.service";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const cookieStore = await cookies();
     const sessionId = cookieStore.get(SESSION_COOKIE_NAME)?.value;
 
     if (!sessionId) {
+      await logSystemEvent({
+        event_type: "permission_denied", request: req, http_status: 401,
+        metadata: { reason: "unauthenticated", action: "user_data_export" },
+      });
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const user = await getUserFromSession(sessionId);
     if (!user) {
+      await logSystemEvent({
+        event_type: "permission_denied", request: req, http_status: 401,
+        metadata: { reason: "invalid_session", action: "user_data_export" },
+      });
       return NextResponse.json({ error: "Session invalid" }, { status: 401 });
     }
 
@@ -46,6 +55,12 @@ export async function GET() {
         format: "json",
       },
     };
+
+    await logDataEvent({
+      event_type: "data_export", user_id: user.id, user_email: user.email,
+      user_role: user.role, target_type: "user_data_export", target_id: String(user.id),
+      request: req, metadata: { format: "json", includes_personal_data: true },
+    });
 
     return NextResponse.json(exportData, {
       headers: {

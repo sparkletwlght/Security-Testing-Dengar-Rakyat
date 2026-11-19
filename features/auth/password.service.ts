@@ -96,7 +96,7 @@ export async function requestPasswordReset(
 export async function resetPassword(
   token: string,
   newPassword: string
-): Promise<ServiceResult<{ message: string }>> {
+): Promise<ServiceResult<{ message: string; userId?: number }>> {
   if (!token || !newPassword || token.length !== 64 || !/^[a-f0-9]{64}$/i.test(token) || newPassword.length > 128) {
     return { ok: false, status: 400, error: "Token dan password wajib diisi" };
   }
@@ -141,6 +141,7 @@ export async function resetPassword(
     return {
       ok: true,
       message: "Password berhasil direset. Silakan login dengan password baru",
+      userId: consumedUserId,
     };
   } catch (error) {
     console.error("Password reset error:", error);

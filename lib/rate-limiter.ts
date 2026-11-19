@@ -19,6 +19,108 @@ interface RateLimitEntry {
 // In-memory store (production: use Redis with TTL)
 const store = new Map<string, RateLimitEntry>();
 
+type LoginBlockLevel = "temporary" | "extended";
+interface LoginFailureEntry {
+  failures: number;
+  expiresAt: number;
+  blockedUntil: number;
+  blockLevel?: LoginBlockLevel;
+}
+
+const loginFailureStore = new Map<string, LoginFailureEntry>();
+const LOGIN_WARNING_AFTER = 3;
+const LOGIN_TEMP_BLOCK_AFTER = 5;
+const LOGIN_TEMP_BLOCK_MS = 15 * 60 * 1000;
+const LOGIN_EXTENDED_BLOCK_MS = 24 * 60 * 60 * 1000;
+const LOGIN_FAILURE_TTL_MS = 24 * 60 * 60 * 1000;
+
+export type LoginAttemptKey = { key: string; scope: "account" | "ip" };
+
+/** Check login lock state without counting a successful credential check as a failure. */
+export function getLoginBlock(keys: LoginAttemptKey[]): {
+  blocked: boolean;
+  retryAfter: number;
+  level?: LoginBlockLevel;
+} {
+  const now = Date.now();
+  for (const [key, entry] of loginFailureStore) {
+    if (entry.expiresAt <= now) loginFailureStore.delete(key);
+  }
+
+  // Account lock takes precedence so a repeated attempt after the 15-minute
+  // cooldown can escalate to a 24-hour lock for that account only.
+  for (const { key, scope } of keys) {
+    const entry = loginFailureStore.get(key);
+    if (!entry || entry.blockedUntil <= now) continue;
+
+    if (scope === "account" && entry.blockLevel === "temporary") {
+      entry.blockLevel = "extended";
+      entry.blockedUntil = now + LOGIN_EXTENDED_BLOCK_MS;
+      entry.expiresAt = entry.blockedUntil;
+    }
+
+    return {
+      blocked: true,
+      retryAfter: Math.max(1, Math.ceil((entry.blockedUntil - now) / 1000)),
+      level: entry.blockLevel,
+    };
+  }
+  return { blocked: false, retryAfter: 0 };
+}
+
+/** Record an invalid credential and return warning/lockout details. */
+export function recordFailedLogin(keys: LoginAttemptKey[]): {
+  failures: number;
+  warning?: string;
+  attemptsRemaining: number;
+  blocked: boolean;
+  retryAfter?: number;
+  level?: LoginBlockLevel;
+} {
+  const now = Date.now();
+  const updated: Array<{ key: string; scope: LoginAttemptKey["scope"]; entry: LoginFailureEntry }> = [];
+
+  for (const { key, scope } of keys) {
+    let entry = loginFailureStore.get(key);
+    if (!entry || entry.expiresAt <= now) {
+      entry = { failures: 0, expiresAt: now + LOGIN_FAILURE_TTL_MS, blockedUntil: 0 };
+    }
+    entry.failures += 1;
+    entry.expiresAt = now + LOGIN_FAILURE_TTL_MS;
+    if (entry.failures >= LOGIN_TEMP_BLOCK_AFTER) {
+      entry.blockLevel = "temporary";
+      entry.blockedUntil = now + LOGIN_TEMP_BLOCK_MS;
+    }
+    if (scope === "account" && entry.failures >= LOGIN_TEMP_BLOCK_AFTER + 1) {
+      entry.blockLevel = "extended";
+      entry.blockedUntil = now + LOGIN_EXTENDED_BLOCK_MS;
+      entry.expiresAt = entry.blockedUntil;
+    }
+    loginFailureStore.set(key, entry);
+    updated.push({ key, scope, entry });
+  }
+
+  const accountEntry = updated.find(({ scope }) => scope === "account")?.entry;
+  const maxFailures = Math.max(...updated.map(({ entry }) => entry.failures));
+  const blockedEntry = updated.find(({ entry }) => entry.blockedUntil > now)?.entry;
+  const warning = accountEntry && accountEntry.failures >= LOGIN_WARNING_AFTER && accountEntry.failures < LOGIN_TEMP_BLOCK_AFTER
+    ? `Peringatan: ${LOGIN_TEMP_BLOCK_AFTER - accountEntry.failures} percobaan gagal lagi akan memblokir login selama 15 menit.`
+    : undefined;
+
+  return {
+    failures: accountEntry?.failures ?? maxFailures,
+    warning,
+    attemptsRemaining: Math.max(0, LOGIN_TEMP_BLOCK_AFTER - (accountEntry?.failures ?? maxFailures)),
+    blocked: Boolean(blockedEntry),
+    retryAfter: blockedEntry ? Math.max(1, Math.ceil((blockedEntry.blockedUntil - now) / 1000)) : undefined,
+    level: blockedEntry?.blockLevel,
+  };
+}
+
+export function resetLoginFailures(keys: LoginAttemptKey[]): void {
+  for (const { key } of keys) loginFailureStore.delete(key);
+}
+
 // Cleanup old entries every 10 minutes
 setInterval(() => {
   const now = Date.now();
@@ -26,6 +128,9 @@ setInterval(() => {
     if (entry.resetAt < now) {
       store.delete(key);
     }
+  }
+  for (const [key, entry] of loginFailureStore.entries()) {
+    if (entry.expiresAt <= now) loginFailureStore.delete(key);
   }
 }, 10 * 60 * 1000);
 
@@ -143,10 +248,6 @@ export function getRemainingAttempts(
  * Rate limit presets (spec: 5 login failures then wait)
  */
 export const RateLimits = {
-  // Spec: 5 attempts, then 2 minutes wait (corrected from 15 min)
-  LOGIN_IP: { maxAttempts: 5, windowMs: 2 * 60 * 1000 }, // Per IP
-  LOGIN_EMAIL: { maxAttempts: 5, windowMs: 2 * 60 * 1000 }, // Per email (account lockout)
-  
   PASSWORD_RESET: { maxAttempts: 3, windowMs: 60 * 60 * 1000 }, // 3 per hour
   API_GENERAL: { maxAttempts: 100, windowMs: 60 * 1000 }, // 100 per minute
   REGISTER: { maxAttempts: 3, windowMs: 60 * 60 * 1000 }, // 3 per hour

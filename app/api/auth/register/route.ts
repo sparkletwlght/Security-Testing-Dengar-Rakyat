@@ -16,13 +16,20 @@ import {
   validateWilayahId,
 } from "@/lib/validators";
 import { checkRateLimit, RateLimits } from "@/lib/rate-limiter";
-import { getClientIP } from "@/lib/request-context";
+import { getClientIP, getRequestContext } from "@/lib/request-context";
+import { logAuthEvent } from "@/features/audit/audit.service";
 import crypto from "node:crypto";
 
 export async function POST(req: Request) {
+  const requestContext = getRequestContext(req);
   try {
     const body = await req.json();
     if (!body || typeof body !== "object" || Array.isArray(body)) {
+      await logAuthEvent({
+        event_type: "register", status: "failure", error_message: "Invalid registration payload",
+        ...requestContext, request_path: new URL(req.url).pathname, http_status: 400,
+        metadata: { reason: "malformed_input" },
+      });
       return NextResponse.json({ error: "Data registrasi tidak valid" }, { status: 400 });
     }
 
@@ -57,6 +64,12 @@ export async function POST(req: Request) {
     if (!wilayahValidation.valid) errors.push(wilayahValidation.error!);
 
     if (errors.length > 0) {
+      await logAuthEvent({
+        event_type: "register", user_email: sanitized.email, status: "failure",
+        error_message: "Registration validation failed", ...requestContext,
+        request_path: new URL(req.url).pathname, http_status: 400,
+        metadata: { reason: "validation_failed", field_count: errors.length },
+      });
       return NextResponse.json(
         {
           error: "Validasi gagal",
@@ -75,9 +88,21 @@ export async function POST(req: Request) {
         ? checkRateLimit(`register:ip:${ip}`, RateLimits.REGISTER.maxAttempts, RateLimits.REGISTER.windowMs)
         : { allowed: true };
       if (!emailLimit.allowed || !ipLimit.allowed) {
+        await logAuthEvent({
+          event_type: "register", user_email: sanitized.email, status: "failure",
+          error_message: "Registration rate limit exceeded", ...requestContext,
+          request_path: new URL(req.url).pathname, http_status: 429,
+          metadata: { reason: "rate_limit" },
+        });
         return NextResponse.json({ error: "Terlalu banyak percobaan registrasi. Coba lagi nanti." }, { status: 429 });
       }
     } catch {
+      await logAuthEvent({
+        event_type: "register", user_email: sanitized.email, status: "failure",
+        error_message: "Registration rate limiter unavailable", ...requestContext,
+        request_path: new URL(req.url).pathname, http_status: 503,
+        metadata: { reason: "rate_limiter_unavailable" },
+      });
       return NextResponse.json({ error: "Layanan registrasi sementara tidak tersedia" }, { status: 503 });
     }
 
@@ -85,11 +110,23 @@ export async function POST(req: Request) {
     const result = await registerUser(sanitized);
 
     if (!result.ok) {
+      await logAuthEvent({
+        event_type: "register", user_email: sanitized.email, status: "failure",
+        error_message: "Registration rejected", ...requestContext,
+        request_path: new URL(req.url).pathname, http_status: result.status,
+        metadata: { reason: "registration_rejected" },
+      });
       return NextResponse.json(
         { error: result.error },
         { status: result.status }
       );
     }
+
+    await logAuthEvent({
+      event_type: "register", user_id: result.user.id, user_email: result.user.email,
+      user_role: result.user.role, status: "success", ...requestContext,
+      request_path: new URL(req.url).pathname, http_status: 201,
+    });
 
     return NextResponse.json(
       {
@@ -99,6 +136,11 @@ export async function POST(req: Request) {
       { status: 201 }
     );
   } catch (err) {
+    await logAuthEvent({
+      event_type: "register", status: "failure", error_message: "Registration processing failed",
+      ...requestContext, request_path: new URL(req.url).pathname, http_status: 500,
+      metadata: { reason: "server_error" },
+    });
     return handleApiError(err, "Register");
   }
 }

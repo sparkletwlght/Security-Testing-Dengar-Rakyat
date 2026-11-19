@@ -50,8 +50,8 @@ export async function updateStatusLaporan(input: {
 }): Promise<ServiceResult<{ message: string; fotoHasilPath?: string | null }>> {
   const { laporanId, statusBaru, diubahOleh, catatan = "", fotoHasil, wilayahIds, allowAllWilayah = false } = input;
 
-  const idNum = typeof laporanId === "number" ? laporanId : Number.parseInt(laporanId, 10);
-  if (Number.isNaN(idNum)) {
+  const idNum = typeof laporanId === "number" ? laporanId : Number(laporanId);
+  if (!Number.isSafeInteger(idNum) || idNum <= 0) {
     return { ok: false, status: 400, error: "ID laporan tidak valid" };
   }
 

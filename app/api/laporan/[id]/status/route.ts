@@ -4,7 +4,7 @@ import { validateSession } from "@/features/auth/session.service";
 import { updateStatusLaporan } from "@/features/laporan/status.service";
 import { SESSION_COOKIE_NAME } from "@/lib/cookies";
 import { handleApiError, ApiError } from "@/lib/error-handler";
-import { logDataEvent } from "@/features/audit/audit.service";
+import { logDataEvent, logSystemEvent } from "@/features/audit/audit.service";
 import { validateCsrfToken, extractCsrfToken } from "@/lib/csrf";
 import { getWilayahTreeIds } from "@/features/wilayah/territory.queries";
 import { getClientIP } from "@/lib/request-context";
@@ -19,11 +19,13 @@ async function handleStatusUpdate(
     const sessionId = cookieStore.get(SESSION_COOKIE_NAME)?.value;
     
     if (!sessionId) {
+      await logSystemEvent({ event_type: "permission_denied", request: req, http_status: 401, metadata: { reason: "unauthenticated", action: "report_status_update" } });
       throw ApiError.unauthorized();
     }
 
     const sessionResult = await validateSession(sessionId);
     if (!sessionResult.valid || !sessionResult.user) {
+      await logSystemEvent({ event_type: "permission_denied", request: req, http_status: 401, metadata: { reason: "invalid_session", action: "report_status_update" } });
       throw ApiError.unauthorized();
     }
 
@@ -32,6 +34,11 @@ async function handleStatusUpdate(
 
     // RBAC: Only admin_pemda, petugas_pos, and pusat can update report status
     if (!["admin_pemda", "pemda", "petugas_pos", "pos", "pusat"].includes(role)) {
+      await logSystemEvent({
+        event_type: "permission_denied", user_id: user.id, user_email: user.email,
+        user_role: user.role, request: req, http_status: 403,
+        metadata: { reason: "insufficient_role", action: "report_status_update" },
+      });
       throw ApiError.forbidden("Hanya Petugas Pos, Pemda, dan Pusat yang berwenang mengubah status laporan");
     }
 
@@ -39,12 +46,17 @@ async function handleStatusUpdate(
     const csrfToken = extractCsrfToken(headersList);
     const csrfResult = validateCsrfToken(csrfToken || "", sessionId);
     if (!csrfResult.valid) {
+      await logSystemEvent({
+        event_type: "csrf_violation", user_id: user.id, user_email: user.email,
+        user_role: user.role, request: req, http_status: 403,
+        metadata: { reason: "invalid_csrf_token", action: "report_status_update" },
+      });
       throw ApiError.forbidden(`CSRF token invalid: ${csrfResult.reason}`);
     }
 
     const { id } = await params;
-    const laporanId = Number.parseInt(id, 10);
-    if (Number.isNaN(laporanId)) {
+    const laporanId = Number(id);
+    if (!Number.isSafeInteger(laporanId) || laporanId <= 0) {
       throw ApiError.badRequest("ID laporan tidak valid");
     }
     const contentLength = Number(req.headers.get("content-length"));
@@ -97,6 +109,12 @@ async function handleStatusUpdate(
     });
 
     if (!result.ok) {
+      await logSystemEvent({
+        event_type: result.status === 403 ? "permission_denied" : "validation_failure",
+        user_id: user.id, user_email: user.email, user_role: user.role,
+        request: req, http_status: result.status || 400,
+        metadata: { reason: result.status === 403 ? "report_status_access_denied" : "report_status_rejected" },
+      });
       return NextResponse.json({ error: result.error }, { status: result.status });
     }
 
@@ -109,6 +127,8 @@ async function handleStatusUpdate(
       target_type: "laporan",
       target_id: id,
       ip_address: getClientIP(req),
+      request: req,
+      http_status: 200,
       metadata: { status: statusBaru },
     });
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import AuthCard from "@/components/ui/AuthCard";
 import FormField from "@/components/ui/FormField";
@@ -10,24 +9,27 @@ import Alert from "@/components/ui/Alert";
 import { postJson } from "@/lib/api-client";
 
 export default function LoginForm({ registered }: { registered?: boolean }) {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [warning, setWarning] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
+    setWarning("");
     setLoading(true);
     const { ok, data } = await postJson("/api/auth/login", { email, password });
     setLoading(false);
+    if (typeof data.warning === "string") setWarning(data.warning);
     if (!ok) {
       setError(data.error ?? "Terjadi kesalahan");
       return;
     }
-    router.push("/dashboard");
-    router.refresh();
+    // A full navigation makes the browser send the newly-set HttpOnly cookie
+    // on the first protected page request.
+    window.location.assign("/dashboard");
   }
 
   return (
@@ -35,6 +37,7 @@ export default function LoginForm({ registered }: { registered?: boolean }) {
       <form onSubmit={handleSubmit} className="space-y-4">
         {registered && <Alert type="success">Registrasi berhasil, silakan masuk.</Alert>}
         {error && <Alert type="error">{error}</Alert>}
+        {warning && <Alert type="warning">{warning}</Alert>}
 
         <FormField id="email" label="Email" type="text" value={email} onChange={(e) => setEmail(e.target.value)} />
         <FormField id="password" label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />

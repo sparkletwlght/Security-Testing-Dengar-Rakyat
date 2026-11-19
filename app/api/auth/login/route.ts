@@ -13,7 +13,7 @@ import { loginUser } from "@/features/auth/login.service";
 import { logAuthEvent } from "@/features/audit/audit.service";
 import { getClientIP, getRequestContext } from "@/lib/request-context";
 import { SESSION_COOKIE_NAME, getSessionCookieOptions } from "@/lib/cookies";
-import { checkMultipleRateLimits, resetRateLimit, RateLimits } from "@/lib/rate-limiter";
+import { getLoginBlock, recordFailedLogin, resetLoginFailures, type LoginAttemptKey } from "@/lib/rate-limiter";
 import { ApiError, handleApiError } from "@/lib/error-handler";
 
 export async function POST(req: Request) {
@@ -29,16 +29,16 @@ export async function POST(req: Request) {
       throw ApiError.badRequest("Email dan password wajib diisi");
     }
     const emailRateKey = crypto.createHash("sha256").update(email).digest("hex");
+    const loginKeys: LoginAttemptKey[] = [
+      { key: `login:account:${emailRateKey}`, scope: "account" },
+      ...(ip !== "unknown" ? [{ key: `login:ip:${ip}`, scope: "ip" as const }] : []),
+    ];
 
-    // Rate limit check (per IP AND per email)
-    // Spec: 5 attempts, then wait 2 minutes
+    // Check temporary and extended lockouts before verifying credentials.
     try {
-      const rateLimit = checkMultipleRateLimits([
-        ...(ip !== "unknown" ? [{ key: `login:ip:${ip}`, ...RateLimits.LOGIN_IP }] : []),
-        { key: `login:email:${emailRateKey}`, ...RateLimits.LOGIN_EMAIL },
-      ]);
+      const rateLimit = getLoginBlock(loginKeys);
 
-      if (!rateLimit.allowed) {
+      if (rateLimit.blocked) {
         // Log rate limit violation
         await logAuthEvent({
           event_type: "login_failure",
@@ -46,18 +46,23 @@ export async function POST(req: Request) {
           status: "failure",
           error_message: "Rate limit exceeded",
           ...context,
+            http_status: 429,
           metadata: { 
             reason: "rate_limit",
-            failedCheck: rateLimit.failedCheck,
             retryAfter: rateLimit.retryAfter,
+            lockLevel: rateLimit.level,
           },
         });
 
+        const isExtended = rateLimit.level === "extended";
         return NextResponse.json(
           { 
-            error: `Terlalu banyak percobaan login. Coba lagi dalam ${rateLimit.retryAfter} detik.`,
+            error: isExtended
+              ? "Akun dikunci selama 24 jam karena percobaan login gagal berulang."
+              : "Terlalu banyak percobaan login. Akun dikunci selama 15 menit.",
             code: "RATE_LIMITED",
             retryAfter: rateLimit.retryAfter,
+            lockLevel: rateLimit.level,
           },
           { 
             status: 429,
@@ -80,6 +85,7 @@ export async function POST(req: Request) {
     const result = await loginUser(email, password);
     
     if (!result.ok) {
+      const failure = recordFailedLogin(loginKeys);
       // Log failed login attempt
       await logAuthEvent({
         event_type: "login_failure",
@@ -87,18 +93,43 @@ export async function POST(req: Request) {
         status: "failure",
         error_message: result.error,
         ...context,
-        metadata: { reason: "invalid_credentials" },
+        http_status: failure.blocked ? 429 : result.status,
+        metadata: {
+          reason: "invalid_credentials",
+          failureCount: failure.failures,
+          lockLevel: failure.level,
+        },
       });
 
+      if (failure.blocked) {
+        return NextResponse.json(
+          {
+            error: failure.level === "extended"
+              ? "Akun dikunci selama 24 jam karena percobaan login gagal berulang."
+              : "Terlalu banyak percobaan login. Akun dikunci selama 15 menit.",
+            code: "RATE_LIMITED",
+            retryAfter: failure.retryAfter,
+            lockLevel: failure.level,
+          },
+          {
+            status: 429,
+            headers: { "Retry-After": String(failure.retryAfter) },
+          }
+        );
+      }
+
       return NextResponse.json(
-        { error: result.error },
+        {
+          error: result.error,
+          warning: failure.warning,
+          attemptsRemaining: failure.attemptsRemaining,
+        },
         { status: result.status }
       );
     }
 
-    // SUCCESS: Reset rate limit counters
-    if (ip !== "unknown") resetRateLimit(`login:ip:${ip}`);
-    resetRateLimit(`login:email:${emailRateKey}`);
+    // Successful authentication resets failed-attempt counters.
+    resetLoginFailures(loginKeys);
 
     // Set secure session cookie
     const cookieStore = await cookies();
@@ -130,7 +161,8 @@ export async function POST(req: Request) {
       status: "failure",
       error_message: "System error during login",
       ...context,
-      metadata: { error: error instanceof Error ? error.message : String(error) },
+      http_status: 500,
+      metadata: { reason: "server_error" },
     });
 
     return handleApiError(error, "Login");

@@ -6,7 +6,7 @@ import { findLaporanByUser, findAllLaporan } from "@/features/laporan/laporan.qu
 import { SESSION_COOKIE_NAME } from "@/lib/cookies";
 import { handleApiError, ApiError } from "@/lib/error-handler";
 import { checkRateLimit, RateLimits } from "@/lib/rate-limiter";
-import { logDataEvent } from "@/features/audit/audit.service";
+import { logDataEvent, logSystemEvent } from "@/features/audit/audit.service";
 import { validateCsrfToken } from "@/lib/csrf";
 import { getWilayahTreeIds } from "@/features/wilayah/territory.queries";
 import { getClientIP } from "@/lib/request-context";
@@ -43,6 +43,11 @@ export async function GET(req: Request) {
     }
     if (role === "warga") {
       const reports = await findLaporanByUser(user.id, undefined, limit, offset);
+      await logDataEvent({
+        event_type: "laporan_read", user_id: user.id, user_email: user.email,
+        user_role: user.role, target_type: "laporan_collection", target_id: "own",
+        request: req, metadata: { scope: "own", result_count: reports.length, limit, offset },
+      });
       return NextResponse.json(reports);
     }
 
@@ -61,6 +66,11 @@ export async function GET(req: Request) {
       reports = [];
     }
 
+    await logDataEvent({
+      event_type: "laporan_read", user_id: user.id, user_email: user.email,
+      user_role: user.role, target_type: "laporan_collection", target_id: role,
+      request: req, metadata: { scope: "authorized", result_count: reports.length, limit, offset },
+    });
     return NextResponse.json(reports);
   } catch (error) {
     return handleApiError(error, "GET /api/laporan");
@@ -107,6 +117,11 @@ export async function POST(req: Request) {
       );
 
       if (!rateLimit.allowed) {
+        await logSystemEvent({
+          event_type: "rate_limit_exceeded", user_id: user.id, user_email: user.email,
+          user_role: user.role, request: req, http_status: 429,
+          metadata: { reason: "report_creation_rate_limit", limit: RateLimits.LAPORAN_CREATE.maxAttempts },
+        });
         throw new ApiError(
           `Batas pembuatan laporan tercapai (maksimal 10 per hari). Coba lagi besok.`,
           429,
@@ -153,6 +168,8 @@ export async function POST(req: Request) {
       target_type: "laporan",
       target_id: String(result.id),
       ip_address: ip,
+      request: req,
+      http_status: 201,
       metadata: { kategori, wilayah_id: user.wilayah_id },
     });
 

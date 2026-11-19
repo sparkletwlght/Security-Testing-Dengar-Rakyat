@@ -4,7 +4,7 @@ import { validateSession } from "@/features/auth/session.service";
 import { findLaporanById, findStatusHistory } from "@/features/laporan/laporan.queries";
 import { SESSION_COOKIE_NAME } from "@/lib/cookies";
 import { handleApiError, ApiError } from "@/lib/error-handler";
-import { logDataEvent } from "@/features/audit/audit.service";
+import { logDataEvent, logSystemEvent } from "@/features/audit/audit.service";
 import { decrypt } from "@/lib/crypto";
 import { getWilayahTreeIds } from "@/features/wilayah/territory.queries";
 import { inspectReportFile } from "@/lib/report-files";
@@ -17,19 +17,21 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const sessionId = cookieStore.get(SESSION_COOKIE_NAME)?.value;
     
     if (!sessionId) {
+      await logSystemEvent({ event_type: "permission_denied", request: req, http_status: 401, metadata: { reason: "unauthenticated", action: "report_read" } });
       throw ApiError.unauthorized();
     }
 
     const sessionResult = await validateSession(sessionId);
     if (!sessionResult.valid || !sessionResult.user) {
+      await logSystemEvent({ event_type: "permission_denied", request: req, http_status: 401, metadata: { reason: "invalid_session", action: "report_read" } });
       throw ApiError.unauthorized();
     }
 
     const user = sessionResult.user;
     const { id } = await params;
-    const laporanId = Number.parseInt(id);
+    const laporanId = Number(id);
 
-    if (Number.isNaN(laporanId)) {
+    if (!Number.isSafeInteger(laporanId) || laporanId <= 0) {
       throw ApiError.badRequest("ID laporan tidak valid");
     }
 
@@ -55,6 +57,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const laporan = await findLaporanById(laporanId, user.id, wilayahIds, isPusat);
 
     if (!laporan) {
+      await logSystemEvent({
+        event_type: "permission_denied", user_id: user.id, user_email: user.email,
+        user_role: user.role, request: req, http_status: 404,
+        metadata: { reason: "report_missing_or_out_of_scope", action: "report_read", target_id: id },
+      });
       throw ApiError.notFound("Laporan tidak ditemukan atau Anda tidak memiliki akses");
     }
 
@@ -91,6 +98,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       target_type: "laporan",
       target_id: id,
       ip_address: getClientIP(req),
+      request: req,
+      http_status: 200,
     });
 
     const statusHistory = await findStatusHistory(laporanId);

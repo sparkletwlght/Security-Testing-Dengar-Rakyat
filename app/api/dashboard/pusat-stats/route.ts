@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/features/auth/session.service";
 import { query } from "@/lib/db";
+import { logDataEvent, logSystemEvent } from "@/features/audit/audit.service";
 
 function numericRows<T extends Record<string, unknown>>(rows: T[]) {
   return rows.map((row) => ({
@@ -10,10 +11,15 @@ function numericRows<T extends Record<string, unknown>>(rows: T[]) {
   }));
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const user = await getCurrentUser();
     if (!user || (user.role || "").toLowerCase() !== "pusat") {
+      await logSystemEvent({
+        event_type: "permission_denied", user_id: user?.id, user_email: user?.email,
+        user_role: user?.role, request: req, http_status: 403,
+        metadata: { reason: "insufficient_role", action: "national_dashboard_metrics" },
+      });
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
 
@@ -51,6 +57,12 @@ export async function GET() {
       LEFT JOIN laporan l ON l.wilayah_id = tree.wilayah_id
       GROUP BY root.id, root.nama ORDER BY count DESC, root.nama ASC LIMIT 15`),
     ]);
+
+    await logDataEvent({
+      event_type: "laporan_read", user_id: user.id, user_email: user.email,
+      user_role: user.role, target_type: "dashboard_metrics", target_id: "national",
+      request: req, metadata: { scope: "national" },
+    });
 
     return NextResponse.json({
       dailyTrend: numericRows(daily.rows),

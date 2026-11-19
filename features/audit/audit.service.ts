@@ -5,13 +5,48 @@
  */
 
 import { pool } from "@/lib/db";
+import { getAuditRequestContext, getRequestContext } from "@/lib/request-context";
+import { hostname } from "node:os";
 import {
   insertAuditLog,
   queryAuditLogs,
   verifyHashChain,
 } from "./audit.queries";
-import type { AuditLogEntry, AuditQuery, AuditLogRecord } from "./audit.types";
+import type { AuditLogEntry, AuditQuery, AuditLogRecord, AuditRequestContext } from "./audit.types";
 import { generateAuditHash } from "./audit-hash";
+
+function writeAuditAccessLine(entry: AuditLogEntry, logId: number): void {
+  const safeField = (value: string) => value.replace(/[\\"\r\n]/g, " ").trim();
+  const metadata = entry.metadata ?? {};
+  const request = metadata.request_context as Partial<AuditRequestContext> | undefined;
+  const sourceIp = safeField(entry.ip_address || "-");
+  const actor = safeField(entry.user_email || (entry.user_id ? `user:${entry.user_id}` : "anonymous"));
+  const userAgent = safeField(entry.user_agent || "-");
+  const method = safeField(request?.method || "-");
+  const path = safeField(request?.path || "-");
+  const httpStatus = request?.http_status ?? (entry.status === "success" ? 200 : 0);
+  const level = entry.status === "success" ? "INFO" : "WARNING";
+  const category = entry.event_category === "auth"
+    ? "authentication"
+    : entry.event_category === "data" ? "data_activity" : "security_event";
+  const eventName = entry.event_type === "login_success" || entry.event_type === "login_failure"
+    ? "authentication"
+    : entry.event_type === "logout" ? "session_management" : category;
+  const reason = typeof metadata.reason === "string" ? metadata.reason : "-";
+  const targetHostname = process.env.AUDIT_HOSTNAME || hostname();
+  const destinationIp = process.env.AUDIT_DESTINATION_IP || "-";
+  const service = request?.service || "unknown";
+
+  console.info(
+    `${sourceIp} - ${actor} [${new Date().toISOString()}] ` +
+    `"${method} ${path} HTTP/1.1" ${httpStatus} - "-" "${userAgent}" ` +
+    `level=${level} event=${eventName} action="${safeField(entry.action)}" ` +
+    `status=${entry.status === "success" ? "success" : "failed"} reason=${safeField(reason)} ` +
+    `role=${safeField(entry.user_role || "-")} ` +
+    `target_type=${safeField(entry.target_type || "-")} target_id=${safeField(entry.target_id || "-")} ` +
+    `host=${safeField(targetHostname)} dst_ip=${safeField(destinationIp)} service=${service} log_id=${logId}`
+  );
+}
 
 /**
  * Log audit event (main function)
@@ -43,6 +78,11 @@ export async function logAudit(entry: AuditLogEntry): Promise<number> {
     );
 
     await connection.commit();
+    try {
+      writeAuditAccessLine(entry, logId);
+    } catch (logError) {
+      console.error("[AUDIT] Could not write terminal event:", logError);
+    }
     return logId;
   } catch (error) {
     await connection.rollback().catch(() => undefined);
@@ -97,12 +137,17 @@ export async function logAuthEvent(params: {
     | "register"
     | "password_reset_request"
     | "password_reset_complete"
+    | "password_change"
   >;
   user_id?: number;
   user_email?: string;
   user_role?: string;
   ip_address?: string;
   user_agent?: string;
+  service?: "HTTP" | "HTTPS";
+  request_method?: string;
+  request_path?: string;
+  http_status?: number;
   status: "success" | "failure";
   error_message?: string;
   metadata?: Record<string, any>;
@@ -114,9 +159,10 @@ export async function logAuthEvent(params: {
     register: "New user registered",
     password_reset_request: "Password reset requested",
     password_reset_complete: "Password reset completed",
+    password_change: "Password changed",
   };
 
-  return logAudit({
+  const logId = await logAudit({
     event_type: params.event_type,
     event_category: "auth",
     action: actionMap[params.event_type],
@@ -127,8 +173,17 @@ export async function logAuthEvent(params: {
     user_agent: params.user_agent,
     status: params.status,
     error_message: params.error_message,
-    metadata: params.metadata,
+    metadata: {
+      ...params.metadata,
+      request_context: {
+        method: params.request_method || "-",
+        path: params.request_path || "-",
+        service: params.service || "HTTP",
+        http_status: params.http_status ?? (params.status === "success" ? 200 : 401),
+      },
+    },
   });
+  return logId;
 }
 
 /**
@@ -142,13 +197,21 @@ export async function logDataEvent(params: {
     | "laporan_update"
     | "laporan_delete"
     | "status_update"
+    | "data_export"
+    | "profile_update"
+    | "comment_create"
+    | "audit_read"
   >;
   user_id: number;
   user_email: string;
   user_role: string;
+  request?: Request;
+  http_status?: number;
   target_type: string;
   target_id: string;
   ip_address?: string;
+  user_agent?: string;
+  request_context?: AuditRequestContext;
   metadata?: Record<string, any>;
 }): Promise<number> {
   const actionMap = {
@@ -157,7 +220,15 @@ export async function logDataEvent(params: {
     laporan_update: "Updated laporan",
     laporan_delete: "Deleted laporan",
     status_update: "Changed laporan status",
+    data_export: "Exported user data",
+    profile_update: "Updated user profile",
+    comment_create: "Created report comment",
+    audit_read: "Viewed security audit trail",
   };
+  const requestDetails = params.request ? getRequestContext(params.request) : undefined;
+  const requestAudit = params.request_context ?? (params.request
+    ? getAuditRequestContext(params.request, params.http_status ?? 200)
+    : undefined);
 
   return logAudit({
     event_type: params.event_type,
@@ -166,11 +237,15 @@ export async function logDataEvent(params: {
     user_id: params.user_id,
     user_email: params.user_email,
     user_role: params.user_role,
+    user_agent: params.user_agent ?? requestDetails?.user_agent,
     target_type: params.target_type,
     target_id: params.target_id,
-    ip_address: params.ip_address,
+    ip_address: params.ip_address ?? requestDetails?.ip_address,
     status: "success",
-    metadata: params.metadata,
+    metadata: {
+      ...params.metadata,
+      ...(requestAudit ? { request_context: requestAudit } : {}),
+    },
   });
 }
 
@@ -180,12 +255,16 @@ export async function logDataEvent(params: {
 export async function logSystemEvent(params: {
   event_type: Extract<
     AuditLogEntry["event_type"],
-    "rate_limit_exceeded" | "csrf_violation" | "invalid_token" | "permission_denied"
+    "rate_limit_exceeded" | "csrf_violation" | "invalid_token" | "permission_denied" | "validation_failure"
   >;
   user_id?: number;
   user_email?: string;
+  user_role?: string;
   ip_address?: string;
   user_agent?: string;
+  request?: Request;
+  http_status?: number;
+  request_context?: AuditRequestContext;
   metadata?: Record<string, any>;
 }): Promise<number> {
   const actionMap = {
@@ -193,7 +272,12 @@ export async function logSystemEvent(params: {
     csrf_violation: "CSRF token validation failed",
     invalid_token: "Invalid or expired token",
     permission_denied: "Access denied - insufficient permissions",
+    validation_failure: "Request validation failed",
   };
+  const requestDetails = params.request ? getRequestContext(params.request) : undefined;
+  const requestAudit = params.request_context ?? (params.request
+    ? getAuditRequestContext(params.request, params.http_status ?? 403)
+    : undefined);
 
   return logAudit({
     event_type: params.event_type,
@@ -201,9 +285,13 @@ export async function logSystemEvent(params: {
     action: actionMap[params.event_type],
     user_id: params.user_id,
     user_email: params.user_email,
-    ip_address: params.ip_address,
-    user_agent: params.user_agent,
+    user_role: params.user_role,
+    ip_address: params.ip_address ?? requestDetails?.ip_address,
+    user_agent: params.user_agent ?? requestDetails?.user_agent,
     status: "failure",
-    metadata: params.metadata,
+    metadata: {
+      ...params.metadata,
+      ...(requestAudit ? { request_context: requestAudit } : {}),
+    },
   });
 }

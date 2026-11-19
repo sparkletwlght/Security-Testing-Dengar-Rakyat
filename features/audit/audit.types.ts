@@ -13,6 +13,9 @@ export type EventType =
   | "password_reset_complete"
   | "password_change"
   | "session_expired"
+  | "profile_update"
+  | "comment_create"
+  | "audit_read"
   // Data events
   | "laporan_create"
   | "laporan_read"
@@ -25,11 +28,19 @@ export type EventType =
   | "rate_limit_exceeded"
   | "csrf_violation"
   | "invalid_token"
-  | "permission_denied";
+  | "permission_denied"
+  | "validation_failure";
 
 export type EventCategory = "auth" | "data" | "system";
 
 export type EventStatus = "success" | "failure" | "warning";
+
+export interface AuditRequestContext {
+  method: string;
+  path: string;
+  service: "HTTP" | "HTTPS";
+  http_status: number;
+}
 
 export interface AuditLogEntry {
   // Event Info

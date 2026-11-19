@@ -2,11 +2,17 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/features/auth/session.service";
 import { getWilayahTreeIds } from "@/features/wilayah/territory.queries";
 import { query } from "@/lib/db";
+import { logDataEvent, logSystemEvent } from "@/features/audit/audit.service";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const user = await getCurrentUser();
     if (!user || (user.role || "").toLowerCase() !== "petugas_pos") {
+      await logSystemEvent({
+        event_type: "permission_denied", user_id: user?.id, user_email: user?.email,
+        user_role: user?.role, request: req, http_status: 403,
+        metadata: { reason: "insufficient_role", action: "local_dashboard_metrics" },
+      });
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
     if (!user.wilayah_id) {
@@ -41,6 +47,11 @@ export async function GET() {
     ]);
 
     const total = totalStats.rows[0] || { total_laporan: 0, selesai: 0, pending: 0 };
+    await logDataEvent({
+      event_type: "laporan_read", user_id: user.id, user_email: user.email,
+      user_role: user.role, target_type: "dashboard_metrics", target_id: String(user.wilayah_id),
+      request: req, metadata: { scope: "assigned_region" },
+    });
     return NextResponse.json({
       dailyTrend: dailyTrend.rows.map((row) => ({ ...row, count: Number(row.count ?? 0) })),
       statusDistribution: statusDistribution.rows.map((row) => ({ ...row, count: Number(row.count ?? 0) })),

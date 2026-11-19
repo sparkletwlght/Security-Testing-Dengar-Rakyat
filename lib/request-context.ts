@@ -6,6 +6,7 @@
 
 import type { NextRequest } from "next/server";
 import { isIP } from "node:net";
+import type { AuditRequestContext } from "@/features/audit/audit.types";
 
 /**
  * Trusted proxies (load balancers, reverse proxies)
@@ -74,8 +75,28 @@ export function getRequestContext(
   request: Request | NextRequest,
   directIP?: string
 ) {
+  const requestUrl = new URL(request.url);
+  const service: "HTTP" | "HTTPS" = requestUrl.protocol === "https:" ? "HTTPS" : "HTTP";
   return {
     ip_address: getClientIP(request, directIP),
     user_agent: getUserAgent(request),
+    service,
+    request_method: request.method,
+    // Keep query parameters out of access logs; they may contain sensitive data.
+    request_path: requestUrl.pathname,
+  };
+}
+
+/** Request details safe to persist in the audit metadata (query string omitted). */
+export function getAuditRequestContext(
+  request: Request | NextRequest,
+  httpStatus: number
+): AuditRequestContext {
+  const url = new URL(request.url);
+  return {
+    method: request.method,
+    path: url.pathname,
+    service: url.protocol === "https:" ? "HTTPS" : "HTTP",
+    http_status: httpStatus,
   };
 }

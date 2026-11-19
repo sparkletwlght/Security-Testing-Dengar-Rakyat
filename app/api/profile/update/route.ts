@@ -10,6 +10,7 @@ import { SESSION_COOKIE_NAME } from "@/lib/cookies";
 import { query } from "@/lib/db";
 import { encrypt } from "@/lib/crypto";
 import { validateCsrfToken } from "@/lib/csrf";
+import { logDataEvent, logSystemEvent } from "@/features/audit/audit.service";
 
 export async function PUT(req: Request) {
   try {
@@ -19,9 +20,18 @@ export async function PUT(req: Request) {
     const user = await getCurrentUser(sessionId);
 
     if (!user) {
+      await logSystemEvent({
+        event_type: "permission_denied", request: req, http_status: 401,
+        metadata: { reason: "unauthenticated", action: "profile_update" },
+      });
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     if (!sessionId || !validateCsrfToken(req.headers.get("x-csrf-token") || "", sessionId).valid) {
+      await logSystemEvent({
+        event_type: "csrf_violation", user_id: user.id, user_email: user.email,
+        user_role: user.role, request: req, http_status: 403,
+        metadata: { reason: "invalid_csrf_token", action: "profile_update" },
+      });
       return NextResponse.json({ error: "CSRF token tidak valid" }, { status: 403 });
     }
 
@@ -30,6 +40,11 @@ export async function PUT(req: Request) {
     const alamat = body?.alamat;
 
     if (typeof nama !== "string" || nama.trim().length < 3 || nama.trim().length > 120 || (alamat != null && (typeof alamat !== "string" || alamat.length > 1000))) {
+      await logSystemEvent({
+        event_type: "validation_failure", user_id: user.id, user_email: user.email,
+        user_role: user.role, request: req, http_status: 400,
+        metadata: { reason: "validation_failed", action: "profile_update" },
+      });
       return NextResponse.json(
         { error: "Nama harus minimal 3 karakter" },
         { status: 400 }
@@ -46,6 +61,12 @@ export async function PUT(req: Request) {
        WHERE id = ?`,
       [nama.trim(), alamatEnc, user.id]
     );
+
+    await logDataEvent({
+      event_type: "profile_update", user_id: user.id, user_email: user.email,
+      user_role: user.role, target_type: "user_profile", target_id: String(user.id),
+      request: req, metadata: { changed_fields: typeof alamat === "string" ? ["nama", "alamat"] : ["nama"] },
+    });
 
     return NextResponse.json({
       message: "Profil berhasil diperbarui",

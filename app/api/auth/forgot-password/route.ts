@@ -53,7 +53,7 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json({
-      message: result.message || "Jika email terdaftar, instruksi reset akan dikirim setelah layanan email tersedia",
+      message: result.message || "Jika email terdaftar dan layanan email tersedia, instruksi reset akan dikirim.",
     });
   } catch (err) {
     console.error("Forgot password API error:", err);
@@ -65,7 +65,7 @@ export async function POST(req: Request) {
     });
     // Generic error (don't leak details)
     return NextResponse.json(
-      { message: "Jika email terdaftar, instruksi reset akan dikirim setelah layanan email tersedia" },
+      { message: "Jika email terdaftar dan layanan email tersedia, instruksi reset akan dikirim." },
       { status: 200 }
     );
   }

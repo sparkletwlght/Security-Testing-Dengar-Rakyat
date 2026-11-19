@@ -5,7 +5,7 @@ Platform pengaduan warga berbasis Next.js dan MySQL. Status ini mencatat pemerik
 ## Menjalankan lokal
 
 1. Gunakan Node.js versi yang didukung Next.js 16 dan MySQL 8.
-2. Buat database `dengar_rakyat`, impor `db/dengar_rakyat.sql`, lalu jalankan migrasi `db/migrations/004_iteration_4.sql` sampai `007_audit_payload_hashes.sql` satu kali dan berurutan.
+2. Buat database `dengar_rakyat`, impor `db/dengar_rakyat.sql`, lalu jalankan migrasi `db/migrations/004_iteration_4.sql` sampai `008_email_verification_otp.sql` satu kali dan berurutan.
 3. Isi `.env.local`:
 
    ```env
@@ -14,9 +14,13 @@ Platform pengaduan warga berbasis Next.js dan MySQL. Status ini mencatat pemerik
    HMAC_KEY=<64-digit-hex>
    CSRF_SECRET=<random-secret-minimum-32-characters>
    TRUST_PROXY_HEADERS=false
+   RESEND_API_KEY=<Resend API key>
+   EMAIL_FROM=<sender yang diizinkan Resend>
+   APP_URL=http://localhost:3000
    ```
 
    Buat dua key hex independen masing-masing 32 byte. Jangan pakai akun MySQL `root` di deployment.
+   Email verifikasi registrasi dan reset password dikirim melalui Resend. Verifikasi domain sender di Resend untuk pengiriman ke penerima umum. Jalankan migrasi 008 sebelum mencoba registrasi OTP. Gunakan `APP_URL` HTTPS di deployment.
 4. Impor master wilayah resmi sebelum registrasi atau membuat akun demo: `npx tsx scripts/seed-wilayah.ts` hanya cocok untuk data seed pengembangan yang disediakan script.
 5. Jalankan `npm install`, `npm run dev`, lalu buka `http://localhost:3000`.
 
@@ -57,7 +61,7 @@ Lihat [LAPORAN_ITERASI_4_DAST_PENTEST.md](./LAPORAN_ITERASI_4_DAST_PENTEST.md) u
 
 ## Batas keamanan yang diketahui
 
-- Reset password belum mengirim email/token karena mailer belum dikonfigurasi; jangan menganggap alur lupa password siap digunakan.
+- Verifikasi email saat registrasi dan reset password memakai Gmail SMTP. Email OTP disimpan sebagai HMAC, berlaku 10 menit, dan dibatasi lima percobaan verifikasi.
 - Rate limit per proses dapat diakali dengan beberapa instance/restart; gunakan store bersama dan limit di ingress.
 - ID sesi mentah tersimpan di tabel sesi; migrasikan ke hash sesi sebelum menghadapi risiko kebocoran database.
 - Verifikasi hash audit baru mencakup payload untuk versi 2. Baris versi 1 belum dapat diverifikasi penuh; hash chain di database bukan anchor eksternal terhadap DBA berhak tinggi.

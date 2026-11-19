@@ -118,6 +118,11 @@ export async function insertResetToken(
   );
 }
 
+/** Remove a reset token if delivery fails before the user receives it. */
+export async function deleteResetToken(tokenHash: string) {
+  await query("DELETE FROM password_resets WHERE token_hash = ? AND used_at IS NULL", [tokenHash]);
+}
+
 /**
  * Find reset token by hash
  */

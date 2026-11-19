@@ -19,6 +19,7 @@ import { checkRateLimit, RateLimits } from "@/lib/rate-limiter";
 import { getClientIP, getRequestContext } from "@/lib/request-context";
 import { logAuthEvent } from "@/features/audit/audit.service";
 import crypto from "node:crypto";
+import { sendRegistrationOtp } from "@/features/auth/email-verification.service";
 
 export async function POST(req: Request) {
   const requestContext = getRequestContext(req);
@@ -106,8 +107,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Layanan registrasi sementara tidak tersedia" }, { status: 503 });
     }
 
-    // Call service
-    const result = await registerUser(sanitized);
+    const otp = typeof body.otp === "string" ? body.otp.trim() : "";
+    if (!otp) {
+      try {
+        const sent = await sendRegistrationOtp(sanitized.email, sanitized.nama);
+        if (!sent.ok) return NextResponse.json({ error: sent.error }, { status: 400 });
+      } catch (emailError) {
+        console.error("Registration OTP email could not be sent:", emailError);
+        return NextResponse.json({ error: "Kode OTP gagal dikirim. Periksa konfigurasi email lalu coba lagi." }, { status: 503 });
+      }
+      return NextResponse.json({ otpRequired: true, message: "Kode OTP sudah dikirim ke email kamu." });
+    }
+
+    // Create the account only after the email OTP has been verified.
+    const result = await registerUser(sanitized, otp);
 
     if (!result.ok) {
       await logAuthEvent({

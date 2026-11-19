@@ -33,6 +33,7 @@ const LOGIN_TEMP_BLOCK_AFTER = 5;
 const LOGIN_TEMP_BLOCK_MS = 15 * 60 * 1000;
 const LOGIN_EXTENDED_BLOCK_MS = 24 * 60 * 60 * 1000;
 const LOGIN_FAILURE_TTL_MS = 24 * 60 * 60 * 1000;
+const LOGIN_FAILURE_STORE_MAX_ENTRIES = 50_000;
 
 export type LoginAttemptKey = { key: string; scope: "account" | "ip" };
 
@@ -45,6 +46,10 @@ export function getLoginBlock(keys: LoginAttemptKey[]): {
   const now = Date.now();
   for (const [key, entry] of loginFailureStore) {
     if (entry.expiresAt <= now) loginFailureStore.delete(key);
+  }
+
+  if (loginFailureStore.size >= LOGIN_FAILURE_STORE_MAX_ENTRIES && keys.some(({ key }) => !loginFailureStore.has(key))) {
+    throw new Error("Login failure store capacity reached");
   }
 
   // Account lock takes precedence so a repeated attempt after the 15-minute
@@ -78,11 +83,19 @@ export function recordFailedLogin(keys: LoginAttemptKey[]): {
   level?: LoginBlockLevel;
 } {
   const now = Date.now();
+  // Bound unauthenticated per-email keys so random email submissions cannot
+  // grow this process-local map without limit. Remove expired entries first.
+  for (const [key, entry] of loginFailureStore) {
+    if (entry.expiresAt <= now) loginFailureStore.delete(key);
+  }
   const updated: Array<{ key: string; scope: LoginAttemptKey["scope"]; entry: LoginFailureEntry }> = [];
 
   for (const { key, scope } of keys) {
     let entry = loginFailureStore.get(key);
     if (!entry || entry.expiresAt <= now) {
+      if (loginFailureStore.size >= LOGIN_FAILURE_STORE_MAX_ENTRIES) {
+        throw new Error("Login failure store capacity reached");
+      }
       entry = { failures: 0, expiresAt: now + LOGIN_FAILURE_TTL_MS, blockedUntil: 0 };
     }
     entry.failures += 1;

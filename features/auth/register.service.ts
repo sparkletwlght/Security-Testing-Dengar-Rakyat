@@ -11,9 +11,11 @@ import { validatePassword } from "@/lib/password-policy";
 import { findUserByEmail, findUserByNik, insertUser } from "./auth.queries";
 import type { RegisterInput, ServiceResult } from "./auth.types";
 import { query } from "@/lib/db";
+import { consumeRegistrationOtp, verifyRegistrationOtp } from "./email-verification.service";
 
 export async function registerUser(
-  input: RegisterInput
+  input: RegisterInput,
+  emailOtp: string
 ): Promise<ServiceResult<{ user: { id: number; email: string; role: string } }>> {
   const { nik, nama, email, alamat, wilayah_id, password } = input;
 
@@ -64,6 +66,10 @@ export async function registerUser(
     return { ok: false, status: 409, error: "NIK sudah terdaftar" };
   }
 
+  if (!(await verifyRegistrationOtp(email, emailOtp))) {
+    return { ok: false, status: 400, error: "Kode OTP salah atau sudah kedaluwarsa. Minta kode baru lalu coba lagi." };
+  }
+
   try {
     // Hash password with Argon2id
     const passwordHash = await argon2.hash(password, {
@@ -86,6 +92,8 @@ export async function registerUser(
       nikHash,
       alamatEnc
     );
+
+    await consumeRegistrationOtp(email);
 
     return { ok: true, user };
   } catch (error) {

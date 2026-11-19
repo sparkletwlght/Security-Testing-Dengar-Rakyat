@@ -49,6 +49,9 @@ export default function RegisterForm() {
   const [errorDetails, setErrorDetails] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otp, setOtp] = useState("");
+  const [otpMessage, setOtpMessage] = useState("");
 
   // Provinsi: di-fetch SEKALI saat halaman dibuka
   useEffect(() => {
@@ -91,6 +94,7 @@ export default function RegisterForm() {
     const { ok, data } = await postJson("/api/auth/register", {
       ...form,
       wilayah_id: kecamatanId,
+      ...(otpSent ? { otp } : {}),
     });
     setLoading(false);
     if (!ok) {
@@ -100,11 +104,29 @@ export default function RegisterForm() {
       }
       return;
     }
+    if (data.otpRequired) {
+      setOtpSent(true);
+      setOtpMessage(data.message ?? "Kode OTP sudah dikirim ke email kamu.");
+      return;
+    }
     router.push("/login?registered=1");
   }
 
+  async function handleResendOtp() {
+    setLoading(true);
+    setError("");
+    const { ok, data } = await postJson("/api/auth/register", { ...form, wilayah_id: kecamatanId });
+    setLoading(false);
+    if (!ok || !data.otpRequired) {
+      setError(data.error ?? "Kode OTP gagal dikirim ulang.");
+      return;
+    }
+    setOtp("");
+    setOtpMessage(data.message ?? "Kode OTP baru sudah dikirim.");
+  }
+
   return (
-    <AuthCard title="Daftar Akun" subtitle="Dengar Rakyat! — Lapor, dilacak, ditindaklanjuti">
+    <AuthCard title="Daftar Akun" subtitle={otpSent ? "Masukkan kode verifikasi yang dikirim ke email kamu" : "Dengar Rakyat! — Lapor, dilacak, ditindaklanjuti"}>
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && (
           <Alert type="error">
@@ -119,7 +141,22 @@ export default function RegisterForm() {
 
         <FormField id="nik" name="nik" label="NIK" inputMode="numeric" pattern="[0-9]{16}" title="NIK harus 16 digit angka" maxLength={16} required value={form.nik} onChange={handleChange} />
         <FormField id="nama" name="nama" label="Nama Lengkap" minLength={2} maxLength={100} required value={form.nama} onChange={handleChange} />
-        <FormField id="email" name="email" label="Email" type="email" maxLength={100} required value={form.email} onChange={handleChange} />
+        <FormField id="email" name="email" label="Email" type="email" maxLength={100} required value={form.email} disabled={otpSent} onChange={handleChange} />
+
+        {otpSent && (
+          <FormField
+            id="otp"
+            name="otp"
+            label="Kode OTP email"
+            inputMode="numeric"
+            pattern="[0-9]{6}"
+            maxLength={6}
+            required
+            value={otp}
+            onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            placeholder="Masukkan 6 digit kode"
+          />
+        )}
 
         <div className="space-y-1">
           <label htmlFor="alamat" className="block text-sm font-medium text-gray-700">
@@ -217,8 +254,16 @@ export default function RegisterForm() {
         </div>
 
         <Button type="submit" disabled={loading}>
-          {loading ? "Memproses..." : "Daftar"}
+          {loading ? "Memproses..." : otpSent ? "Verifikasi dan Daftar" : "Kirim Kode OTP"}
         </Button>
+        {otpSent && (
+          <div className="space-y-2 text-center text-sm text-gray-600">
+            <p>{otpMessage} Kode berlaku 10 menit.</p>
+            <button type="button" onClick={handleResendOtp} disabled={loading} className="font-medium text-blue-600 disabled:opacity-50">
+              {loading ? "Mengirim..." : "Kirim ulang kode"}
+            </button>
+          </div>
+        )}
       </form>
 
       <p className="text-center text-sm text-gray-500">

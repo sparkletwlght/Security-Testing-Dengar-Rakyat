@@ -121,9 +121,10 @@ export async function checkSystemHealth(): Promise<{
     await query("SELECT 1");
     checks.database = { status: "ok" };
   } catch (err) {
+    console.error("[Monitoring] Database health check failed:", err);
     checks.database = {
       status: "error",
-      message: err instanceof Error ? err.message : "Unknown error",
+      message: "Database unavailable",
     };
   }
 

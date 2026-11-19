@@ -85,7 +85,16 @@ export async function POST(req: Request) {
     const result = await loginUser(email, password);
     
     if (!result.ok) {
-      const failure = recordFailedLogin(loginKeys);
+      let failure: ReturnType<typeof recordFailedLogin>;
+      try {
+        failure = recordFailedLogin(loginKeys);
+      } catch (rateLimitError) {
+        console.error("[LOGIN] Could not record failed attempt:", rateLimitError);
+        return NextResponse.json(
+          { error: "Layanan tidak tersedia", code: "SERVICE_UNAVAILABLE" },
+          { status: 503 }
+        );
+      }
       // Log failed login attempt
       await logAuthEvent({
         event_type: "login_failure",

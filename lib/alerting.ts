@@ -3,6 +3,8 @@
  * Send alerts via Slack, Email, or webhook
  */
 
+import { sendSecurityAlertEmail } from "@/lib/email";
+
 export type AlertLevel = "info" | "warning" | "critical";
 
 export interface Alert {
@@ -75,11 +77,14 @@ async function sendSlackAlert(alert: Alert, timestamp: Date): Promise<void> {
   };
 
   try {
-    await fetch(webhookUrl, {
+    const response = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    if (!response.ok) {
+      console.error("[Alerting] Slack webhook rejected alert:", response.status);
+    }
   } catch (err) {
     console.error("[Alerting] Failed to send Slack alert:", err);
   }
@@ -92,12 +97,16 @@ async function sendEmailAlert(alert: Alert, timestamp: Date): Promise<void> {
   const email = process.env.ALERT_EMAIL;
   if (!email) return;
 
-  // TODO: Implement email sending (via SendGrid, SES, etc)
-  // Use safe format to prevent format string injection
-  console.log("[Alerting] Would send email to:", email, {
-    subject: `[${alert.level.toUpperCase()}] ${alert.title}`,
-    body: alert.message,
-  });
+  const details = alert.data ? `\n\nDetails:\n${JSON.stringify(alert.data, null, 2)}` : "";
+  try {
+    await sendSecurityAlertEmail(
+      email,
+      `[${alert.level.toUpperCase()}] ${alert.title}`,
+      `${alert.message}${details}\n\nTime: ${timestamp.toISOString()}`
+    );
+  } catch (error) {
+    console.error("[Alerting] Failed to send email alert:", error);
+  }
 }
 
 /**
@@ -117,11 +126,14 @@ async function sendWebhookAlert(alert: Alert, timestamp: Date): Promise<void> {
   };
 
   try {
-    await fetch(webhookUrl, {
+    const response = await fetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    if (!response.ok) {
+      console.error("[Alerting] Custom webhook rejected alert:", response.status);
+    }
   } catch (err) {
     console.error("[Alerting] Failed to send webhook alert:", err);
   }

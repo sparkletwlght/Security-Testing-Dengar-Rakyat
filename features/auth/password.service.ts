@@ -15,11 +15,13 @@ import { checkRateLimit, RateLimits } from "@/lib/rate-limiter";
 import {
   findUserByEmail,
   insertResetToken,
+  deleteResetToken,
   findResetToken,
   consumePasswordReset,
   updatePasswordAndRotateSessions,
 } from "./auth.queries";
 import type { ServiceResult } from "./auth.types";
+import { isEmailConfigured, sendPasswordResetEmail } from "@/lib/email";
 
 const TOKEN_EXPIRY_MINUTES = 15;
 
@@ -31,8 +33,16 @@ const TOKEN_EXPIRY_MINUTES = 15;
 export async function requestPasswordReset(
   email: string
 ): Promise<ServiceResult<{ message: string }>> {
+  const genericResponse: ServiceResult<{ message: string }> = {
+    ok: true,
+    message: "Jika email terdaftar dan layanan email tersedia, instruksi reset akan dikirim.",
+  };
+
+  // Do not create unreachable reset tokens when outbound email is unavailable.
+  if (!isEmailConfigured()) return genericResponse;
+
   // Rate limit check
-  const rateLimit = checkRateLimit(
+  const rateLimit = await checkRateLimit(
     `password-reset:${email}`,
     RateLimits.PASSWORD_RESET.maxAttempts,
     RateLimits.PASSWORD_RESET.windowMs
@@ -46,12 +56,6 @@ export async function requestPasswordReset(
       error: `Terlalu banyak percobaan. Coba lagi dalam ${minutesLeft} menit`,
     };
   }
-
-  // Always return generic response (timing-safe)
-  const genericResponse: ServiceResult<{ message: string }> = {
-    ok: true,
-    message: "Jika email terdaftar, instruksi reset akan dikirim setelah layanan email tersedia",
-  };
 
   try {
     // Find user
@@ -79,7 +83,21 @@ export async function requestPasswordReset(
     // Store hashed token
     await insertResetToken(user.id, tokenHash, expiresAt);
 
-    // No email transport is configured yet; never return the raw reset token.
+    // Send only over the provider API; raw tokens are never returned by this service.
+    try {
+      const appUrl = process.env.APP_URL;
+      if (!appUrl) throw new Error("APP_URL is not configured");
+      const resetUrl = new URL("/reset-password", appUrl);
+      resetUrl.searchParams.set("token", plainToken);
+      if (process.env.NODE_ENV === "production" && resetUrl.protocol !== "https:") {
+        throw new Error("APP_URL must use HTTPS in production");
+      }
+      await sendPasswordResetEmail(user.email, user.nama, resetUrl);
+    } catch (deliveryError) {
+      await deleteResetToken(tokenHash);
+      throw deliveryError;
+    }
+
     return genericResponse;
   } catch (error) {
     console.error("Password reset request error:", error);

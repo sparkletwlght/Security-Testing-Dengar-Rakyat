@@ -168,8 +168,17 @@ export async function updateStatusLaporan(input: {
     );
     await connection.commit();
   } catch (error) {
-    await connection.rollback();
-    if (fotoHasilPath) await unlink(path.join(UPLOAD_DIR, path.basename(fotoHasilPath))).catch(() => undefined);
+    try {
+      await connection.rollback();
+    } catch (rollbackError) {
+      console.error("[LAPORAN] Failed to roll back status update:", rollbackError);
+    } finally {
+      if (fotoHasilPath) {
+        await unlink(path.join(UPLOAD_DIR, path.basename(fotoHasilPath))).catch((cleanupError) => {
+          console.error("[LAPORAN] Failed to remove uncommitted result photo:", cleanupError);
+        });
+      }
+    }
     throw error;
   } finally {
     connection.release();
